@@ -16,13 +16,6 @@ from mathutils import Vector
 from bpy_extras import view3d_utils
 
 
-# ---------------------------------------------------------------------
-# Perfis de estilização — pequenas curvas 2D usadas como bevel_object.
-# Ficam guardadas numa collection escondida "Hair Profiles" pra não
-# poluir a cena. São compartilhadas entre todas as curvas de cabelo
-# (trocar a espessura de um perfil afeta todas as curvas que o usam —
-# se quiser variação por curva, duplique o perfil antes de ajustar).
-# ---------------------------------------------------------------------
 PROFILE_COLLECTION_NAME = "Hair Profiles"
 
 
@@ -31,7 +24,6 @@ def get_profile_collection():
     if coll is None:
         coll = bpy.data.collections.new(PROFILE_COLLECTION_NAME)
         bpy.context.scene.collection.children.link(coll)
-        # some do view layer sem apagar os dados, só não aparece na cena
         layer_coll = bpy.context.view_layer.layer_collection.children.get(coll.name)
         if layer_coll:
             layer_coll.exclude = True
@@ -39,9 +31,6 @@ def get_profile_collection():
 
 
 def _new_curve_object(name, points_xy, cyclic, smooth=False):
-    """smooth=True usa uma spline NURBS (interpola suavemente entre os
-    pontos, como as curvas nativas do Blender) em vez de POLY (linhas
-    retas entre os pontos, resultado facetado/rígido)."""
     curve_data = bpy.data.curves.new(name, type='CURVE')
     curve_data.dimensions = '2D'
     spline_type = 'NURBS' if smooth else 'POLY'
@@ -52,9 +41,6 @@ def _new_curve_object(name, points_xy, cyclic, smooth=False):
     spline.use_cyclic_u = cyclic
 
     if smooth:
-        # order_u não pode passar do número de pontos; e pra curva não
-        # fechada precisa tocar as pontas (endpoint) senão ela "encolhe"
-        # pra dentro e não passa pelo primeiro/último ponto
         spline.order_u = min(4, len(points_xy))
         spline.use_endpoint_u = not cyclic
         curve_data.resolution_u = 12
@@ -106,10 +92,6 @@ PROFILE_BUILDERS = {
 
 
 def get_or_create_profile(kind, segments=8, smooth=True):
-    """Pra ROUND/STAR, o nome do objeto inclui a configuração (lados,
-    suave/rígido) — assim mudar essas opções não reaproveita o perfil
-    errado; cada combinação fica com seu próprio objeto na collection
-    escondida."""
     if kind == 'ROUND':
         suffix = "smooth" if smooth else "rigid"
         name = f"HairProfile_Round_{segments}_{suffix}"
@@ -136,21 +118,10 @@ def get_or_create_profile(kind, segments=8, smooth=True):
     return PROFILE_BUILDERS[kind]()
 
 
-# ---------------------------------------------------------------------
-# Perfil customizado — normaliza a escala do objeto escolhido pra
-# combinar com o tamanho dos perfis padrão (~0.01), em vez de usar o
-# tamanho "cru" que o objeto já tinha (que podia deixar as mechas
-# gigantes ou minúsculas dependendo de como a curva foi desenhada).
-# A escala "base" fica guardada como custom property no próprio
-# objeto, e o slider de Espessura multiplica em cima dela (não
-# substitui), então os dois continuam funcionando juntos.
-# ---------------------------------------------------------------------
-TARGET_PROFILE_RADIUS = 0.01  # mesmo raio padrão do perfil redondo
+TARGET_PROFILE_RADIUS = 0.01
 
 
 def _profile_local_max_extent(obj):
-    """Maior distância da origem até um ponto de controle da curva, em
-    espaço local — usado como 'raio' aproximado do perfil pra escala."""
     max_extent = 0.0
     if obj.data and hasattr(obj.data, "splines"):
         for spline in obj.data.splines:
@@ -168,16 +139,12 @@ def get_profile_base_scale(obj):
 
 
 def apply_profile_scale(obj, thickness_scale):
-    """Aplica escala = base normalizada × espessura do slider."""
     base = get_profile_base_scale(obj)
     s = base * thickness_scale
     obj.scale = (s, s, s)
 
 
 def normalize_custom_profile_scale(obj, thickness_scale, force=False):
-    """Calcula (uma vez só, a menos que force=True) um fator de escala
-    que deixa o perfil customizado do tamanho certo, guarda esse fator
-    no próprio objeto, e aplica junto com a espessura atual."""
     if not force and obj.get("hair_profile_normalized"):
         return
 
@@ -192,8 +159,6 @@ def normalize_custom_profile_scale(obj, thickness_scale, force=False):
 
 
 def resolve_bevel_object(context):
-    """Decide qual objeto usar como bevel_object, tratando o caso
-    'Customizado' separadamente dos presets (Round/Flat/Square/Star)."""
     scene = context.scene
     kind = scene.hair_profile_kind
     if kind == 'CUSTOM':
@@ -201,8 +166,6 @@ def resolve_bevel_object(context):
         if custom is not None:
             normalize_custom_profile_scale(custom, scene.hair_thickness_scale)
             return custom
-        # sem perfil customizado escolhido ainda: cai pro redondo como
-        # padrão seguro, em vez de quebrar
         return get_or_create_profile('ROUND', scene.hair_profile_segments, scene.hair_profile_smooth)
     if kind == 'ROUND':
         return get_or_create_profile('ROUND', scene.hair_profile_segments, scene.hair_profile_smooth)
@@ -211,59 +174,33 @@ def resolve_bevel_object(context):
     return get_or_create_profile(kind)
 
 
-# ---------------------------------------------------------------------
-# Snap — liga as configurações nativas de snap do Blender pra que o
-# desenho da curva (Draw Tool nativa, ou extrude com Ctrl+clique) fique
-# preso à superfície do mesh selecionado.
-# ---------------------------------------------------------------------
 def enable_surface_snap(context):
-    """Liga snap na superfície. Os nomes exatos de algumas propriedades
-    mudaram entre versões do Blender (ex: use_snap_project não existe
-    mais em algumas versões 4.x), então cada uma é setada só se existir
-    nesta versão — assim o operator nunca quebra por AttributeError."""
     ts = context.scene.tool_settings
     ts.use_snap = True
 
     if hasattr(ts, "snap_elements"):
         ts.snap_elements = {'FACE'}
     elif hasattr(ts, "snap_elements_base"):
-        # Blender 4.x dividiu em base/individual
         ts.snap_elements_base = {'FACE'}
 
     optional_flags = (
-        ("use_snap_align_rotation", True),  # alinha orientação à normal da face
-        ("use_snap_project", True),         # projeta na superfície ao mover/extrudar
+        ("use_snap_align_rotation", True),
+        ("use_snap_project", True),
         ("use_snap_backface_culling", True),
     )
     for attr, value in optional_flags:
         if hasattr(ts, attr):
             setattr(ts, attr, value)
-    # "Project Individual Elements" costuma ficar no painel de redo (F9)
-    # do próprio operator de mover/extrudar, não é sempre uma propriedade
-    # fixa de tool_settings — varia por versão.
 
 
-# ---------------------------------------------------------------------
-# Raycast — em vez de depender do snap nativo (pouco confiável no modo
-# de edição de Curve, principalmente no Ctrl+clique de extrude), o
-# próprio addon lança o raio da tela contra a cabeça e posiciona cada
-# ponto exatamente onde acertou. Assim a curva nunca atravessa o mesh,
-# independente de configuração de snap.
-# ---------------------------------------------------------------------
-SURFACE_OFFSET = 0.0005  # pequeno afastamento ao longo da normal, evita z-fighting
-STABILIZER_MAX_WINDOW = 40  # teto do slider de Estabilização (nº de posições do mouse na média)
+SURFACE_OFFSET = 0.0005
+STABILIZER_MAX_WINDOW = 40
 
 
-HAIR_STRAND_PREFIX = "HairStrand"  # usado pra reconhecer objetos de cabelo já desenhados
+HAIR_STRAND_PREFIX = "HairStrand"
 
 
 def raycast_targets(context, coord, targets):
-    """Lança o raio da tela contra uma lista de objetos e retorna a
-    posição mundial do hit MAIS PRÓXIMO da câmera (já deslocada um
-    pouco ao longo da normal), ou None se não acertou nenhum. Isso é o
-    que permite desenhar uma mecha grudada na cabeça OU em cima de uma
-    mecha já desenhada, dependendo do que estiver mais próximo — dá o
-    efeito de camadas/sombra de uma mecha sobre a outra."""
     region = context.region
     rv3d = context.region_data
     ray_origin = view3d_utils.region_2d_to_origin_3d(region, rv3d, coord)
@@ -298,9 +235,6 @@ def raycast_targets(context, coord, targets):
 
 
 def collect_existing_hair_objects(exclude=None):
-    """Lista os objetos Curve já criados por esta ferramenta (identificados
-    pelo prefixo do nome), pra poder desenhar mechas novas grudadas em
-    cima delas."""
     result = []
     for obj in bpy.data.objects:
         if obj is exclude:
@@ -311,12 +245,6 @@ def collect_existing_hair_objects(exclude=None):
 
 
 def sample_point(context, coord, targets, last_point):
-    """Tenta grudar na superfície (cabeça e, se habilitado, mechas já
-    desenhadas) via raycast a partir de coord (x, y em coordenadas da
-    região); se não acertar nada, cai pra um ponto livre no espaço,
-    projetado na profundidade do último ponto do traço — assim o
-    desenho continua naturalmente formando cachos que saem do couro
-    cabeludo, em vez de simplesmente parar de adicionar pontos."""
     hit = raycast_targets(context, coord, targets)
     if hit is not None:
         return hit
@@ -331,8 +259,6 @@ def sample_point(context, coord, targets, last_point):
 
 
 def add_spline_from_points(curve_obj, world_points):
-    """Adiciona uma nova spline (POLY) ao objeto Curve existente, a
-    partir de uma lista de posições em espaço de mundo."""
     curve_data = curve_obj.data
     matrix_inv = curve_obj.matrix_world.inverted()
 
@@ -344,25 +270,70 @@ def add_spline_from_points(curve_obj, world_points):
     return spline
 
 
-# ---------------------------------------------------------------------
-# Afinamento — usa o atributo "radius" de cada ponto da spline, que
-# escala o perfil de bevel localmente (funciona com qualquer perfil:
-# redondo, flat, quadrado, estrela ou customizado). Serve pra simular
-# um fio de cabelo real (afina nas pontas) sem precisar de um perfil
-# separado. Pode afinar só a ponta final, só a raiz, ou as duas —
-# pra dreads/mechas grossas basta deixar desligado (espessura uniforme).
-# ---------------------------------------------------------------------
+def resolve_safe_collection(context):
+    layer_coll = context.view_layer.active_layer_collection
+    if layer_coll is not None and not getattr(layer_coll, "exclude", False):
+        return layer_coll.collection
+    return context.scene.collection
+
+
+def ensure_object_in_view_layer(context, obj):
+    if obj.name in context.view_layer.objects:
+        return
+    safe_coll = resolve_safe_collection(context)
+    if obj.name not in safe_coll.objects:
+        safe_coll.objects.link(obj)
+
+
+def _perpendicular_distance(point, line_start, line_end):
+    line_vec = line_end - line_start
+    length_sq = line_vec.length_squared
+    if length_sq < 1e-12:
+        return (point - line_start).length
+    t = (point - line_start).dot(line_vec) / length_sq
+    t = max(0.0, min(1.0, t))
+    projection = line_start + line_vec * t
+    return (point - projection).length
+
+
+def simplify_stroke_points(points, epsilon):
+    n = len(points)
+    if epsilon <= 0.0 or n < 3:
+        return points
+
+    keep = [False] * n
+    keep[0] = True
+    keep[-1] = True
+    stack = [(0, n - 1)]
+
+    while stack:
+        start_i, end_i = stack.pop()
+        if end_i <= start_i + 1:
+            continue
+        start_pt = points[start_i]
+        end_pt = points[end_i]
+        max_dist = -1.0
+        max_idx = -1
+        for i in range(start_i + 1, end_i):
+            d = _perpendicular_distance(points[i], start_pt, end_pt)
+            if d > max_dist:
+                max_dist = d
+                max_idx = i
+        if max_dist > epsilon:
+            keep[max_idx] = True
+            stack.append((start_i, max_idx))
+            stack.append((max_idx, end_i))
+
+    return [p for p, k in zip(points, keep) if k]
+
+
 def apply_taper_to_spline(spline, fraction, tip_radius, mode):
-    """mode: 'TIP' (afina o final do traço), 'ROOT' (afina o início),
-    ou 'BOTH' (afina as duas pontas, cada uma com sua própria fração/
-    espessura, sem se sobrepor no meio da mecha)."""
     points = spline.points
     n = len(points)
     if n < 2 or mode == 'OFF':
         reset_spline_radius(spline)
         return
 
-    # zera tudo primeiro pra não sobrar afinamento de uma config antiga
     for point in points:
         point.radius = 1.0
 
@@ -383,23 +354,14 @@ def apply_taper_to_spline(spline, fraction, tip_radius, mode):
 
 
 def reset_spline_radius(spline):
-    """Volta todos os pontos da spline pra espessura uniforme (radius 1.0)."""
     for point in spline.points:
         point.radius = 1.0
 
 
-# ---------------------------------------------------------------------
-# Preview GPU — desenha em tempo real, sobre o viewport, os pontos já
-# raycastados do traço em andamento (tanto no modo Livre quanto no
-# modo por clique). Sem isso o traço fica "cego" até ser confirmado.
-# O nome do shader uniforme mudou entre versões do Blender (3.x usa o
-# prefixo "3D_", 4.x não), então tentamos os dois e guardamos qual
-# funcionou em cache, pra não ficar tentando toda hora.
-# ---------------------------------------------------------------------
 _UNIFORM_SHADER_CACHE = None
 
-STROKE_PREVIEW_COLOR = (1.0, 0.55, 0.1, 0.95)   # laranja: traço em andamento
-STROKE_PREVIEW_POINT_COLOR = (1.0, 0.9, 0.2, 1.0)  # ponto do início do traço
+STROKE_PREVIEW_COLOR = (1.0, 0.55, 0.1, 0.95)
+STROKE_PREVIEW_POINT_COLOR = (1.0, 0.9, 0.2, 1.0)
 
 
 def get_uniform_color_shader():
@@ -416,9 +378,6 @@ def get_uniform_color_shader():
 
 
 def draw_stroke_preview(points):
-    """Desenha o traço em andamento (lista de posições em espaço de
-    mundo) como uma linha, e um ponto destacado na origem do traço pra
-    deixar claro onde ele começou."""
     if not points:
         return
 
@@ -449,29 +408,11 @@ def draw_stroke_preview(points):
     gpu.state.blend_set('NONE')
 
 
-# ---------------------------------------------------------------------
-# Operators
-# ---------------------------------------------------------------------
 class HAIR_OT_draw_strand(bpy.types.Operator):
-    """Desenha mechas continuamente, com preview ao vivo no viewport.
-    Modo Livre: clique e arraste sobre a cabeça pra grudar na
-    superfície, ou continue arrastando pra fora dela pra formar cachos
-    soltos no espaço; solte o botão pra confirmar. Modo Contínuo: clique
-    uma vez pra começar, mova o mouse (a mecha vai grudando na
-    superfície em tempo real, exatamente como no Livre, só que sem
-    precisar segurar o botão), e clique de novo ou aperte Enter pra
-    terminar — como cada ponto já vem do raycast seguindo o mouse, a
-    mecha nunca atravessa a cabeça em linha reta. A primeira mecha cria
-    o objeto Curve e entra em modo de edição automaticamente; as
-    próximas viram novas splines desse mesmo objeto. Ctrl+Z desfaz a
-    última mecha confirmada. Navegue a view livremente a qualquer
-    momento. Space encerra a ferramenta."""
     bl_idname = "hair.draw_strand"
-    bl_label = "Desenhar Mechas"
+    bl_label = "Desenhar Mecha"
     bl_options = {'REGISTER', 'UNDO'}
 
-    # eventos de navegação que devem passar direto pro viewport em vez
-    # de serem interceptados pela ferramenta
     NAV_PASSTHROUGH = {
         'MIDDLEMOUSE', 'WHEELUPMOUSE', 'WHEELDOWNMOUSE',
         'TRACKPADPAN', 'TRACKPADZOOM',
@@ -486,36 +427,67 @@ class HAIR_OT_draw_strand(bpy.types.Operator):
 
     def invoke(self, context, event):
         self.target = context.scene.hair_surface_target
-        self.points = []
-        self.raw_coords = []
-        self.drawing = False
         self.strand_count = 0
+        self.spline_history = []  # (curve_obj, spline) confirmados nesta sessão, pra Ctrl+Z
 
-        # continua na mecha ativa se houver uma selecionada no viewport,
-        # senão na última mecha lembrada pela cena; None só se realmente
-        # não houver nenhuma (aí o primeiro traço cria uma nova)
+        # se o objeto ativo no viewport já for uma mecha desenhada por
+        # esta ferramenta, continua adicionando splines nela; senão,
+        # cada sessão cria um objeto novo (sem depender de nenhum
+        # estado "lembrado" entre uma sessão e outra)
         active_obj = context.active_object
         if (active_obj is not None and active_obj.type == 'CURVE'
                 and active_obj.name.startswith(HAIR_STRAND_PREFIX)):
             self.curve_obj = active_obj
         else:
-            self.curve_obj = context.scene.hair_active_curve
+            self.curve_obj = None
 
         self._draw_handler = bpy.types.SpaceView3D.draw_handler_add(
             self._draw_callback, (), 'WINDOW', 'POST_VIEW'
         )
 
+        started_in_viewport = (
+            context.area is not None and context.area.type == 'VIEW_3D'
+            and context.region is not None and context.region.type == 'WINDOW'
+        )
+        if started_in_viewport:
+            # veio de um clique de verdade na viewport (ex: ferramenta
+            # "Cabelo"): já começa a primeira mecha a partir desse clique
+            self._start_stroke(context, event)
+        else:
+            # veio de fora da viewport (ex: botão "Desenhar Mecha (1
+            # traço)" do painel): NÃO começa nenhum traço ainda — sem
+            # isso, um simples mover do mouse sobre a cabeça (sem
+            # clicar) já desenhava uma linha guia sozinha, porque a
+            # sessão pensava que já estava "no meio de um traço". Agora
+            # ela fica só armada, esperando o primeiro clique de
+            # verdade dentro da viewport (o modal() abaixo trata isso
+            # igual trata o início de qualquer mecha seguinte).
+            self.points = []
+            self.raw_coords = []
+            self.anchored = False
+            self.in_stroke = False
+
         context.window_manager.modal_handler_add(self)
         self._update_status_text(context)
         return {'RUNNING_MODAL'}
 
+    def _start_stroke(self, context, event):
+        """Reseta o estado de UM traço (não da sessão inteira) e tenta
+        registrar o primeiro ponto a partir do evento que o iniciou."""
+        self.points = []
+        self.raw_coords = []
+        self.anchored = False
+        self.in_stroke = True
+
+        started_in_viewport = (
+            context.area is not None and context.area.type == 'VIEW_3D'
+            and context.region is not None and context.region.type == 'WINDOW'
+        )
+        if started_in_viewport:
+            self._add_point(context, event)
+
     def _draw_callback(self):
-        """Chamado pelo Blender a cada redraw do viewport enquanto o
-        modal está ativo — desenha o traço em andamento (self.points),
-        tanto no modo Livre (durante o arraste) quanto no modo Contínuo
-        (entre o clique inicial e o clique/Enter final)."""
-        if self.drawing:
-            draw_stroke_preview(self.points)
+        draw_stroke_preview(self.points)
 
     def _remove_draw_handler(self):
         if getattr(self, "_draw_handler", None) is not None:
@@ -524,31 +496,22 @@ class HAIR_OT_draw_strand(bpy.types.Operator):
 
     def _update_status_text(self, context):
         if context.scene.hair_draw_mode == 'TWO_POINT':
-            if not self.drawing:
-                context.workspace.status_text_set(
-                    "Clique pra começar a mecha. Ctrl+Z desfaz a última "
-                    "mecha. Space encerra a ferramenta."
-                )
-            else:
-                context.workspace.status_text_set(
-                    "Mova o mouse pra traçar (gruda na superfície ao vivo). "
-                    "Clique ou Enter termina a mecha. Botão direito ou Esc "
-                    "cancela o traço atual."
-                )
-        else:
-            context.workspace.status_text_set(
-                "Clique e arraste: na cabeça gruda na superfície, fora dela forma cachos soltos. "
-                "Ctrl+Z desfaz a última mecha. Space encerra a ferramenta."
+            base = (
+                "Clique na cabeça pra ancorar e começar a mecha. Depois, "
+                "mova o mouse pra traçar; clique ou Enter termina."
             )
+        else:
+            base = (
+                "Clique na cabeça pra ancorar e arraste pra traçar (pode "
+                "sair da superfície e formar um cacho solto). Solte o "
+                "botão pra confirmar."
+            )
+        context.workspace.status_text_set(
+            base + " Repita pra desenhar outra mecha. Ctrl+Z desfaz a "
+            "última mecha. Space encerra a sessão."
+        )
 
     def modal(self, context, event):
-        # Deixa passar direto pro Blender qualquer evento fora da área
-        # principal do Viewport 3D: painel N (barra lateral), outros
-        # editores (Propriedades, Outliner...), abas de workspace, etc.
-        # Isso é o que permite usar os controles do addon e o resto da
-        # interface sem precisar apertar Space pra "sair" da ferramenta
-        # antes. Só o clique dentro do viewport 3D em si é interpretado
-        # como desenho.
         if context.area is None or context.area.type != 'VIEW_3D':
             return {'PASS_THROUGH'}
         if context.region is None or context.region.type != 'WINDOW':
@@ -558,68 +521,46 @@ class HAIR_OT_draw_strand(bpy.types.Operator):
 
         two_point_mode = context.scene.hair_draw_mode == 'TWO_POINT'
 
-        if event.type == 'LEFTMOUSE' and event.value == 'PRESS':
-            if not self.drawing:
-                # começa um traço novo — igual nos dois modos
-                self.drawing = True
-                self.points = []
-                self.raw_coords = []
-                self._add_point(context, event)
-                if two_point_mode:
-                    self._update_status_text(context)
-                return {'RUNNING_MODAL'}
-            elif two_point_mode:
-                # segundo clique no modo Contínuo termina o traço
+        if event.type == 'MOUSEMOVE' and self.in_stroke:
+            self._add_point(context, event)
+            return {'RUNNING_MODAL'}
+
+        if event.type == 'LEFTMOUSE':
+            if event.value == 'PRESS':
+                if not self.in_stroke:
+                    # não tem traço rolando: este clique começa uma mecha nova
+                    self._start_stroke(context, event)
+                    return {'RUNNING_MODAL'}
+                elif two_point_mode:
+                    # modo Contínuo: segundo clique termina o traço atual
+                    self._end_stroke(context)
+                    return {'RUNNING_MODAL'}
+            elif event.value == 'RELEASE' and self.in_stroke and not two_point_mode:
+                # modo Livre: soltar o botão termina o traço atual
                 self._end_stroke(context)
                 return {'RUNNING_MODAL'}
-            # no modo Livre um clique nesse estado não faz nada (quem
-            # termina o traço é o RELEASE, abaixo)
-            return {'RUNNING_MODAL'}
 
-        elif event.type == 'LEFTMOUSE' and event.value == 'RELEASE' and not two_point_mode:
-            self._end_stroke(context)
-            return {'RUNNING_MODAL'}  # segue esperando o próximo traço
-
-        elif event.type == 'MOUSEMOVE' and self.drawing:
-            self._add_point(context, event)
-
-        elif (event.type in {'RET', 'NUMPAD_ENTER'} and event.value == 'PRESS'
-                and two_point_mode and self.drawing):
+        elif two_point_mode and event.type in {'RET', 'NUMPAD_ENTER'} and event.value == 'PRESS' and self.in_stroke:
             self._end_stroke(context)
             return {'RUNNING_MODAL'}
 
-        elif event.type == 'Z' and event.ctrl and event.value == 'PRESS' and not self.drawing:
+        elif event.type in {'RIGHTMOUSE', 'ESC'} and self.in_stroke:
+            # cancela só o traço em andamento, sem sair da sessão
+            self.in_stroke = False
+            self.points = []
+            return {'RUNNING_MODAL'}
+
+        elif event.type == 'Z' and event.ctrl and event.value == 'PRESS' and not self.in_stroke:
             self._undo_last_stroke(context)
             return {'RUNNING_MODAL'}
 
-        elif event.type == 'SPACE' and event.value == 'PRESS' and not self.drawing:
-            self._remove_draw_handler()
-            context.workspace.status_text_set(None)
-            if self.curve_obj is not None:
-                self.report(
-                    {'INFO'},
-                    f"{self.strand_count} mecha(s) nesta sessão. "
-                    f"'{self.curve_obj.name}' continua ativa — reabra a "
-                    "ferramenta pra continuar nela, ou use 'Nova Mecha'."
-                )
-            else:
-                self.report({'INFO'}, f"{self.strand_count} mecha(s) criada(s)")
+        elif event.type == 'SPACE' and event.value == 'PRESS' and not self.in_stroke:
+            self._end_session(context)
             return {'FINISHED'}
 
-        elif event.type in {'RIGHTMOUSE', 'ESC'} and self.drawing:
-            # cancela só o traço em andamento (em qualquer modo), sem
-            # sair da ferramenta
-            self.drawing = False
-            self.points = []
-            self.raw_coords = []
-            if two_point_mode:
-                self._update_status_text(context)
-            return {'RUNNING_MODAL'}
-
-        elif event.type == 'ESC' and not self.drawing:
-            # fora de um traço, Esc também encerra a ferramenta (Space é o principal)
-            self._remove_draw_handler()
-            context.workspace.status_text_set(None)
+        elif event.type == 'ESC' and not self.in_stroke:
+            # fora de um traço, Esc também encerra a sessão (Space é o principal)
+            self._end_session(context)
             return {'FINISHED'}
 
         elif event.type in self.NAV_PASSTHROUGH:
@@ -628,41 +569,95 @@ class HAIR_OT_draw_strand(bpy.types.Operator):
         return {'RUNNING_MODAL'}
 
     def _end_stroke(self, context):
-        """Termina o traço em andamento (RELEASE no modo Livre, ou
-        segundo clique/Enter no modo Contínuo) e confirma a mecha se
-        ela tiver pontos suficientes."""
-        self.drawing = False
-        if len(self.points) >= 2:
+        """Termina o traço atual (RELEASE no modo Livre, segundo clique/
+        Enter no modo Contínuo). Confirma a mecha se ancorada e com
+        pontos suficientes; senão descarta silenciosamente (clique no
+        vazio) ou avisa (traço curto demais). A sessão continua rodando
+        de qualquer forma, pronta pro próximo traço. Importante: limpa
+        self.points em TODOS os casos — senão o preview em laranja
+        continua desenhando a última mecha na tela até o próximo traço
+        de fato começar, dando a impressão de uma linha "fantasma"
+        aparecendo antes de qualquer clique novo."""
+        try:
+            if not self.anchored:
+                return
+
+            if len(self.points) < 2:
+                self.report({'WARNING'}, "Mecha muito curta, ignorada")
+                return
+
             self._commit_stroke(context)
-        else:
-            self.report({'WARNING'}, "Mecha muito curta, ignorada")
-        self.points = []
-        if context.scene.hair_draw_mode == 'TWO_POINT':
-            self._update_status_text(context)
+            self.strand_count += 1
+        finally:
+            self.in_stroke = False
+            self.points = []
+            self.raw_coords = []
+
+    def _end_session(self, context):
+        """Encerra a sessão de desenho inteira: solta o preview, limpa
+        a status bar, e volta pra ferramenta de Seleção."""
+        self._remove_draw_handler()
+        context.workspace.status_text_set(None)
+        self.report({'INFO'}, f"{self.strand_count} mecha(s) criada(s)")
+        try:
+            bpy.ops.wm.tool_set_by_id(name="builtin.select_box")
+        except RuntimeError:
+            pass
+
+    def _undo_last_stroke(self, context):
+        """Desfaz a última mecha confirmada nesta sessão. Como a sessão
+        inteira é UMA operação modal (só registra undo do Blender ao
+        terminar com Space/Esc), o Ctrl+Z nativo não desfaz mecha por
+        mecha durante a sessão — por isso esse controle manual."""
+        if not self.spline_history:
+            self.report({'INFO'}, "Nada para desfazer")
+            return
+
+        curve_obj, spline = self.spline_history.pop()
+        self.strand_count -= 1
+
+        was_edit = context.mode == 'EDIT_CURVE'
+        if was_edit:
+            bpy.ops.object.mode_set(mode='OBJECT')
+
+        curve_obj.data.splines.remove(spline)
+
+        if len(curve_obj.data.splines) == 0:
+            data = curve_obj.data
+            bpy.data.objects.remove(curve_obj, do_unlink=True)
+            bpy.data.curves.remove(data)
+            if self.curve_obj is curve_obj:
+                self.curve_obj = None
+        elif was_edit:
+            bpy.ops.object.mode_set(mode='EDIT')
+
+        self.report({'INFO'}, "Última mecha desfeita")
 
     def _get_raycast_targets(self, context):
-        """Monta a lista de objetos contra os quais o raycast é testado:
-        a cabeça sempre, e as mechas já desenhadas se a opção de
-        sobreposição estiver ligada (exceto a própria curva em edição,
-        pra não colidir com o traço que ainda está sendo desenhado)."""
         targets = [self.target]
         if context.scene.hair_overlap_hair:
             targets.extend(collect_existing_hair_objects(exclude=self.curve_obj))
         return targets
 
     def _add_point(self, context, event):
-        last = self.points[-1] if self.points else None
         raw_coord = (event.mouse_region_x, event.mouse_region_y)
 
-        # guarda só as últimas STABILIZER_MAX_WINDOW posições — é tudo
-        # que a estabilização pode precisar, então não faz sentido
-        # deixar a lista crescer sem limite num traço longo
         self.raw_coords.append(raw_coord)
         if len(self.raw_coords) > STABILIZER_MAX_WINDOW:
             self.raw_coords = self.raw_coords[-STABILIZER_MAX_WINDOW:]
 
         coord = self._stabilized_coord(context)
         targets = self._get_raycast_targets(context)
+
+        if not self.anchored:
+            hit = raycast_targets(context, coord, targets)
+            if hit is None:
+                return
+            self.anchored = True
+            self.points.append(hit)
+            return
+
+        last = self.points[-1] if self.points else None
         p = sample_point(context, coord, targets, last)
         if p is None:
             return
@@ -670,13 +665,6 @@ class HAIR_OT_draw_strand(bpy.types.Operator):
             self.points.append(p)
 
     def _stabilized_coord(self, context):
-        """Faz a média das últimas N posições cruas do mouse (N = valor
-        do slider de Estabilização, até STABILIZER_MAX_WINDOW) antes de
-        raycastar — isso funciona como um filtro passa-baixa sobre o
-        movimento do mouse, removendo a tremedeira de alta frequência
-        (tipo estabilização de imagem/vídeo) às custas de um pequeno
-        atraso entre o cursor e o ponto desenhado. 0 desliga (usa a
-        posição crua, sem atraso)."""
         window = max(1, min(context.scene.hair_stroke_stabilizer, len(self.raw_coords)))
         recent = self.raw_coords[-window:]
         avg_x = sum(c[0] for c in recent) / len(recent)
@@ -684,11 +672,6 @@ class HAIR_OT_draw_strand(bpy.types.Operator):
         return (avg_x, avg_y)
 
     def _commit_stroke(self, context):
-        """Confirma o traço atual: cria o objeto Curve na primeira vez
-        (e entra em modo de edição), ou adiciona uma spline nova nas
-        vezes seguintes. Sai do Edit Mode brevemente pra mexer nos
-        dados de baixo nível e volta em seguida, senão a edição de
-        curva do Blender pode ficar dessincronizada."""
         was_edit = context.mode == 'EDIT_CURVE'
         if was_edit:
             bpy.ops.object.mode_set(mode='OBJECT')
@@ -701,12 +684,10 @@ class HAIR_OT_draw_strand(bpy.types.Operator):
             curve_data.use_fill_caps = True
 
             self.curve_obj = bpy.data.objects.new(HAIR_STRAND_PREFIX, curve_data)
-            context.collection.objects.link(self.curve_obj)
+            resolve_safe_collection(context).objects.link(self.curve_obj)
 
-        # garante que a mecha (nova ou retomada de uma sessão anterior)
-        # é a que fica ativa/selecionada antes de entrar em Edit Mode —
-        # senão o mode_set abaixo editaria qualquer outro objeto que
-        # estivesse ativo no momento
+        ensure_object_in_view_layer(context, self.curve_obj)
+
         for other in context.selected_objects:
             if other is not self.curve_obj:
                 other.select_set(False)
@@ -714,6 +695,10 @@ class HAIR_OT_draw_strand(bpy.types.Operator):
         self.curve_obj.select_set(True)
 
         scene = context.scene
+
+        if len(self.points) > 2 and scene.hair_stroke_simplify > 0.0:
+            self.points = simplify_stroke_points(self.points, scene.hair_stroke_simplify)
+
         spline = add_spline_from_points(self.curve_obj, self.points)
 
         if scene.hair_taper_mode != 'OFF':
@@ -722,61 +707,13 @@ class HAIR_OT_draw_strand(bpy.types.Operator):
                 scene.hair_taper_mode
             )
 
-        self.strand_count += 1
+        self.spline_history.append((self.curve_obj, spline))
 
-        context.scene.hair_active_curve = self.curve_obj
-
-        bpy.ops.object.mode_set(mode='EDIT')
-
-    def _undo_last_stroke(self, context):
-        """Remove a última spline confirmada. Em vez de guardar uma
-        referência ao objeto Spline (que fica inválida depois de
-        trocar de modo OBJECT/EDIT, já que o Blender reconstrói os
-        dados internos da curva), sempre pega a última spline da lista
-        atual — como mechas só são adicionadas no final, isso é
-        equivalente e nunca aponta pra memória obsoleta."""
-        if self.curve_obj is None or len(self.curve_obj.data.splines) == 0:
-            self.report({'INFO'}, "Nada para desfazer")
-            return
-
-        self.strand_count -= 1
-
-        was_edit = context.mode == 'EDIT_CURVE'
         if was_edit:
-            bpy.ops.object.mode_set(mode='OBJECT')
-
-        splines = self.curve_obj.data.splines
-        splines.remove(splines[-1])
-
-        if len(splines) == 0:
-            data = self.curve_obj.data
-            obj_to_remove = self.curve_obj
-            self.curve_obj = None
-            context.scene.hair_active_curve = None
-            bpy.data.objects.remove(obj_to_remove, do_unlink=True)
-            bpy.data.curves.remove(data)
-        elif was_edit:
             bpy.ops.object.mode_set(mode='EDIT')
-
-        self.report({'INFO'}, "Última mecha desfeita")
-
-
-class HAIR_OT_new_strand(bpy.types.Operator):
-    """Esquece a mecha ativa: o próximo traço desenhado vai criar um
-    objeto Curve novo, em vez de continuar adicionando splines na
-    mecha atual"""
-    bl_idname = "hair.new_strand"
-    bl_label = "Nova Mecha"
-    bl_options = {'REGISTER', 'UNDO'}
-
-    def execute(self, context):
-        context.scene.hair_active_curve = None
-        self.report({'INFO'}, "Próximo traço vai criar uma mecha nova")
-        return {'FINISHED'}
 
 
 class HAIR_OT_toggle_snap(bpy.types.Operator):
-    """Liga/desliga o snap de superfície manualmente"""
     bl_idname = "hair.toggle_snap"
     bl_label = "Alternar Snap"
     bl_options = {'REGISTER', 'UNDO'}
@@ -797,9 +734,6 @@ class HAIR_OT_toggle_snap(bpy.types.Operator):
 
 
 class HAIR_OT_normalize_custom_profile(bpy.types.Operator):
-    """Recalcula a escala normalizada do perfil customizado — use se
-    você redimensionar a curva escolhida em 'Perfil Customizado' depois
-    de já ter usado ela aqui"""
     bl_idname = "hair.normalize_custom_profile"
     bl_label = "Renormalizar Escala"
     bl_options = {'REGISTER', 'UNDO'}
@@ -815,7 +749,6 @@ class HAIR_OT_normalize_custom_profile(bpy.types.Operator):
 
 
 class HAIR_OT_apply_profile(bpy.types.Operator):
-    """Aplica o perfil de estilização selecionado à curva ativa"""
     bl_idname = "hair.apply_profile"
     bl_label = "Aplicar Perfil"
     bl_options = {'REGISTER', 'UNDO'}
@@ -838,8 +771,6 @@ class HAIR_OT_apply_profile(bpy.types.Operator):
 
 
 class HAIR_OT_apply_taper(bpy.types.Operator):
-    """Aplica (ou remove, se o modo estiver 'Desligado') o afinamento
-    em todas as splines da curva ativa, usando as configurações atuais"""
     bl_idname = "hair.apply_taper"
     bl_label = "Aplicar Afinamento"
     bl_options = {'REGISTER', 'UNDO'}
@@ -861,9 +792,6 @@ class HAIR_OT_apply_taper(bpy.types.Operator):
 
 
 class HAIR_OT_set_thickness(bpy.types.Operator):
-    """Ajusta a espessura do perfil aplicado à curva ativa (multiplica
-    a escala base do perfil, então funciona certo tanto pros perfis
-    padrão quanto pro customizado normalizado)"""
     bl_idname = "hair.set_thickness"
     bl_label = "Ajustar Espessura"
     bl_options = {'REGISTER', 'UNDO'}
@@ -878,9 +806,31 @@ class HAIR_OT_set_thickness(bpy.types.Operator):
         return {'FINISHED'}
 
 
-# ---------------------------------------------------------------------
-# UI
-# ---------------------------------------------------------------------
+class HAIR_WT_draw_tool(bpy.types.WorkSpaceTool):
+    bl_space_type = 'VIEW_3D'
+    bl_context_mode = 'OBJECT'
+    bl_idname = "hair.draw_tool"
+    bl_label = "Cabelo"
+    bl_description = (
+        "Desenha mechas de cabelo grudadas na superfície escolhida.\n"
+        "Clique (e arraste, no modo Livre) pra desenhar; navegue\n"
+        "livremente entre uma mecha e outra"
+    )
+    bl_icon = "ops.curve.draw"
+    bl_widget = None
+    bl_keymap = (
+        ("hair.draw_strand", {"type": 'LEFTMOUSE', "value": 'PRESS'}, None),
+        ("wm.tool_set_by_id", {"type": 'SPACE', "value": 'PRESS'},
+         {"properties": [("name", "builtin.select_box")]}),
+    )
+
+    def draw_settings(context, layout, tool):
+        scene = context.scene
+        layout.prop(scene, "hair_surface_target", text="Cabeça")
+        layout.prop(scene, "hair_draw_mode", text="")
+        layout.prop(scene, "hair_stroke_stabilizer", text="Estabilização", slider=True)
+
+
 class HAIR_PT_panel(bpy.types.Panel):
     bl_label = "Hair"
     bl_idname = "HAIR_PT_panel"
@@ -896,18 +846,11 @@ class HAIR_PT_panel(bpy.types.Panel):
         col.prop(scene, "hair_surface_target", text="Cabeça (superfície)")
 
         layout.separator()
-        active_row = layout.row(align=True)
-        if scene.hair_active_curve is not None:
-            active_row.label(text=f"Mecha ativa: {scene.hair_active_curve.name}", icon='CURVE_DATA')
-        else:
-            active_row.label(text="Mecha ativa: nenhuma", icon='CURVE_DATA')
-        active_row.operator("hair.new_strand", text="", icon='ADD')
-
-        layout.separator()
         col = layout.column(align=True)
         col.prop(scene, "hair_draw_mode", text="Modo")
         col.prop(scene, "hair_stroke_stabilizer", text="Estabilização", slider=True)
-        col.operator("hair.draw_strand", icon='CURVE_DATA')
+        col.prop(scene, "hair_stroke_simplify", text="Simplificar (reduz polígonos)")
+        col.operator("hair.draw_strand", text="Desenhar Mecha (1 traço)", icon='CURVE_DATA')
         col.operator("hair.toggle_snap", icon='SNAP_FACE', text="Snap p/ edição manual")
         col.prop(scene, "hair_overlap_hair")
 
@@ -943,19 +886,22 @@ class HAIR_PT_panel(bpy.types.Panel):
         info = layout.box()
         info.label(text="Fluxo:")
         info.label(text="  1. Escolha a cabeça acima")
-        info.label(text="  2. 'Desenhar Mechas': clique+arraste")
-        info.label(text="     na cabeça gruda; fora dela, cacho")
-        info.label(text="     livre. Ctrl+Z desfaz a última.")
-        info.label(text="     Space termina — a mecha continua")
-        info.label(text="     ativa pra você retomar depois.")
+        info.label(text="  2. Selecione a ferramenta 'Cabelo' na")
+        info.label(text="     caixa de ferramentas do Viewport (T)")
+        info.label(text="  3. Clique NA CABEÇA pra ancorar e")
+        info.label(text="     começar a mecha (clicar no vazio ou")
+        info.label(text="     em outro objeto não faz nada). Depois")
+        info.label(text="     de ancorada ela pode sair da")
+        info.label(text="     superfície e formar um cacho solto.")
+        info.label(text="  4. Solte o botão (ou clique/Enter no")
+        info.label(text="     modo Contínuo) pra confirmar — e")
+        info.label(text="     repita pra desenhar outra mecha.")
+        info.label(text="  5. Ctrl+Z desfaz a última mecha. Space")
+        info.label(text="     encerra a sessão de vez.")
 
 
-# ---------------------------------------------------------------------
-# Registro
-# ---------------------------------------------------------------------
 classes = (
     HAIR_OT_draw_strand,
-    HAIR_OT_new_strand,
     HAIR_OT_toggle_snap,
     HAIR_OT_apply_profile,
     HAIR_OT_normalize_custom_profile,
@@ -992,18 +938,11 @@ def register():
     )
     bpy.types.Scene.hair_profile_segments = bpy.props.IntProperty(
         name="Lados do perfil", default=8, min=3, max=32,
-        description="Número de lados do perfil redondo. Poucos lados "
-                    "(3-5) dão um visual mais facetado, bom pra mechas "
-                    "volumosas/estilizadas; mais lados (8+) dão um "
-                    "cilindro mais liso"
+        description="teste"
     )
     bpy.types.Scene.hair_profile_smooth = bpy.props.BoolProperty(
         name="Suavizar perfil", default=True,
-        description="Usa uma curva NURBS suave (como as curvas nativas "
-                    "do Blender) em vez de linhas retas entre os pontos. "
-                    "Desligue pra manter o visual facetado/rígido — útil "
-                    "junto com poucos 'Lados' pra um efeito de mecha "
-                    "volumosa/estilizada, tipo dread"
+        description="teste"
     )
     bpy.types.Scene.hair_thickness_scale = bpy.props.FloatProperty(
         name="Espessura", default=1.0, min=0.01, max=10.0
@@ -1011,40 +950,32 @@ def register():
 
     bpy.types.Scene.hair_active_curve = bpy.props.PointerProperty(
         name="Mecha Ativa", type=bpy.types.Object,
-        description="Última curva de cabelo editada. 'Desenhar Mechas' "
-                    "continua adicionando traços nela em vez de criar "
-                    "uma nova — use 'Nova Mecha' pra começar outra",
+        description="teste",
         poll=lambda self, obj: obj.type == 'CURVE' and obj.name.startswith(HAIR_STRAND_PREFIX)
     )
 
     bpy.types.Scene.hair_overlap_hair = bpy.props.BoolProperty(
         name="Sobrepor em cabelo já desenhado", default=False,
-        description="Além da cabeça, o raycast também tenta grudar em "
-                    "mechas já desenhadas (a superfície mais próxima da "
-                    "câmera 'ganha') — dá um efeito de camadas, com "
-                    "sombra de uma mecha sobre a outra. Pode ficar mais "
-                    "lento com muitas mechas na cena"
+        description="teste"
     )
     bpy.types.Scene.hair_draw_mode = bpy.props.EnumProperty(
         name="Modo de desenho", default='FREE',
         items=[
             ('FREE', "Livre (arrastar)", "Clique e arraste continuamente pra desenhar a mecha; solte pra confirmar"),
-            ('TWO_POINT', "Contínuo (clique p/ começar/parar)",
-             "Clique pra começar, mova o mouse pra traçar (gruda na "
-             "superfície ao vivo, sem precisar segurar o botão), e "
-             "clique de novo ou aperte Enter pra terminar"),
+            ('TWO_POINT', "Contínuo (clique p/ começar/parar)", "teste"),
         ],
         description="Como cada mecha é desenhada"
     )
 
     bpy.types.Scene.hair_stroke_stabilizer = bpy.props.IntProperty(
         name="Estabilização", default=0, min=0, max=STABILIZER_MAX_WINDOW,
-        description="Suaviza o traço fazendo uma média das últimas N "
-                    "posições do mouse antes de raycastar (tipo "
-                    "estabilização de imagem: reduz a tremedeira). 0 "
-                    "desliga; valores altos deixam a linha mais lisa, "
-                    "mas com mais atraso entre o cursor e o ponto "
-                    "desenhado"
+        description="teste"
+    )
+
+    bpy.types.Scene.hair_stroke_simplify = bpy.props.FloatProperty(
+        name="Simplificar Traço", default=0.0008, min=0.0, max=0.02,
+        subtype='DISTANCE',
+        description="teste"
     )
 
     bpy.types.Scene.hair_taper_mode = bpy.props.EnumProperty(
@@ -1055,25 +986,25 @@ def register():
             ('ROOT', "Só na raiz", "Afina só o início do traço"),
             ('BOTH', "Nas duas pontas", "Afina início e fim do traço"),
         ],
-        description="Onde a mecha afina, simulando um fio de cabelo "
-                    "real. O lado 'ponta final'/'raiz' depende de qual "
-                    "ponta você desenhou primeiro"
+        description="teste"
     )
     bpy.types.Scene.hair_taper_fraction = bpy.props.FloatProperty(
         name="Trecho afinado", default=0.35, min=0.05, max=1.0,
         subtype='FACTOR',
-        description="Que parte do traço participa do afinamento em "
-                    "cada ponta afinada"
+        description="teste"
     )
     bpy.types.Scene.hair_taper_tip_radius = bpy.props.FloatProperty(
         name="Espessura na ponta", default=0.05, min=0.0, max=1.0,
         subtype='FACTOR',
-        description="Espessura relativa no ponto mais fino (0 = afina "
-                    "até quase desaparecer, 1 = sem afinamento)"
+        description="teste"
     )
+
+    bpy.utils.register_tool(HAIR_WT_draw_tool, after={"builtin.cursor"}, separator=True, group=False)
 
 
 def unregister():
+    bpy.utils.unregister_tool(HAIR_WT_draw_tool)
+
     del bpy.types.Scene.hair_surface_target
     del bpy.types.Scene.hair_thickness_scale
     del bpy.types.Scene.hair_profile_custom
@@ -1084,6 +1015,7 @@ def unregister():
     del bpy.types.Scene.hair_overlap_hair
     del bpy.types.Scene.hair_draw_mode
     del bpy.types.Scene.hair_stroke_stabilizer
+    del bpy.types.Scene.hair_stroke_simplify
     del bpy.types.Scene.hair_taper_mode
     del bpy.types.Scene.hair_taper_fraction
     del bpy.types.Scene.hair_taper_tip_radius
