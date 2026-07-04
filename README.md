@@ -1,3 +1,5 @@
+<img width="464" height="240" alt="0704(1)" src="https://github.com/user-attachments/assets/6941f73e-ca5d-4caa-a96f-e838105b3f35" />
+<img width="464" height="240" alt="0704" src="https://github.com/user-attachments/assets/84cfa51a-2b0a-4fad-ba44-f52fa97e4fc2" />
 # simple-hair-curve-blender
 Addon para Blender que permite desenhar mechas de cabelo diretamente sobre a superfície do modelo usando raycast.
 
