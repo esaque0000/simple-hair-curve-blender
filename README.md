@@ -1,78 +1,63 @@
-<img width="464" height="240" alt="0704(1)" src="https://github.com/user-attachments/assets/6941f73e-ca5d-4caa-a96f-e838105b3f35" />
-<img width="464" height="240" alt="0704" src="https://github.com/user-attachments/assets/84cfa51a-2b0a-4fad-ba44-f52fa97e4fc2" />
-# simple-hair-curve-blender
-Addon para Blender que permite desenhar mechas de cabelo diretamente sobre a superfície do modelo usando raycast.
-
 # Simple Hair Curve
 
-Simple Hair Curve é um addon para Blender que permite desenhar mechas de cabelo diretamente sobre a superfície de um mesh usando raycast.
+Simple Hair Curve is a Blender add-on that speeds up the creation of stylized hair guides from Vertex Groups.
 
-O objetivo do projeto é oferecer uma forma rápida e intuitiva de criar cabelos estilizados através de curvas, aproveitando as ferramentas nativas de edição do Blender.
-
-> ⚠️ Este projeto ainda está em desenvolvimento (v0.9.0).
+Instead of manually placing every curve, the add-on generates evenly distributed hair guides over a painted scalp area, providing a fast starting point for creating hair cards or stylized hairstyles.
 
 ---
 
-## Recursos
+## Features
 
-- Desenho de mechas com raycast na superfície.
-- Modo Livre.
-- Modo Clique a Clique.
-- Preview da mecha durante o desenho.
-- Perfis de curva:
-  - Redondo
-  - Flat
-  - Quadrado
-  - Estrela
-  - Perfil personalizado
-- Afinamento (Taper):
-  - Ponta
-  - Raiz
-  - Ambos
-- Espessura ajustável.
-- Loop opcional.
-- Desfaz a última mecha.
-- Entra automaticamente no modo de edição da curva após finalizar.
+- Generate hair curves from Vertex Groups.
+- Multiple strand profile presets.
+- Adjustable strand taper.
+- Interactive Comb Brush.
+- Create Mecha Brush.
+- Curve styling options.
+- Fast workflow for stylized hair.
 
 ---
 
-## Planejamento
+## Gallery
 
-Funcionalidades planejadas para versões futuras:
+<p align="center">
+<img src="images/demo.gif" width="700">
+</p>
 
--  ✔ Estabilização do desenho (ajustável de 0 a 40).
-- [ ] Melhor sistema de preview.
-- [ ] Ferramentas de edição de mechas.
-- [ ] Geração de Hair Cards.
-- [ ] UV automática.
-- [ ] Melhor suporte para cabelos estilizados.
+<img width="464" height="240" alt="0709" src="https://github.com/user-attachments/assets/faa6b214-8a61-4c2c-9c0d-40f821f52c2f" />
+<img width="464" height="240" alt="0709(1)" src="https://github.com/user-attachments/assets/a30fbafb-d02a-4bf8-86d8-c31d01189ad0" />
+<img width="464" height="240" alt="0709(2)" src="https://github.com/user-attachments/assets/70ceab34-636a-4857-889a-f72261baed75" />
 
----
-
-## Compatibilidade
-
-- Blender 3.6+
-- Testado em Blender 4.x
 
 ---
 
-## Instalação
+## Installation
 
-1. Baixe o arquivo `.zip`.
-2. Abra o Blender.
-3. Edit → Preferences → Add-ons.
-4. Clique em **Install...**
-5. Selecione o arquivo do addon.
-6. Ative o addon.
-
----
-
-## Licença
-
-Este projeto é distribuído sob a licença **GNU General Public License v3.0 (GPL-3.0)**.
+1. Download the latest release.
+2. Open Blender.
+3. Go to **Edit → Preferences → Add-ons**.
+4. Click **Install**.
+5. Select the ZIP file.
+6. Enable **Simple Hair Curve**.
 
 ---
 
-## Autor
+## Workflow
 
-Esaque Silva
+1. Paint a Vertex Group on the scalp.
+2. Select the mesh.
+3. Generate hair curves.
+4. Comb and adjust the guides.
+5. Convert them into your preferred hair card workflow.
+
+---
+
+## Compatibility
+
+- Blender 4.x
+
+---
+
+## License
+
+MIT License.
