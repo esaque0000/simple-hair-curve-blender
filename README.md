@@ -1,8 +1,18 @@
 # Simple Hair Curve
 
-Simple Hair Curve is a Blender add-on that speeds up the creation of stylized hair guides from Vertex Groups.
+Simple Hair Curve is a Blender add-on for generating editable hair curves from painted Vertex Groups.
 
-Instead of manually placing every curve, the add-on generates evenly distributed hair guides over a painted scalp area, providing a fast starting point for creating hair cards or stylized hairstyles.
+It provides a fast starting point for creating stylized hairstyles by automatically generating evenly distributed hair guides, allowing artists to focus on grooming and artistic decisions instead of repetitive manual placement.
+
+---
+
+## Project Status
+
+Simple Hair Curve is currently under active commercial development.
+
+This repository showcases the project, its workflow, and its evolution.
+
+The latest version is not publicly available for download.
 
 ---
 
